@@ -15,30 +15,27 @@ logger = logging.getLogger("safepoint-ml")
 # ── Config ────────────────────────────────────────────────────────────────────
 MODEL_DIR = os.getenv("MODEL_DIR", r"d:\Develop\General\safe-point\ml-service\model")
 MAX_LEN   = int(os.getenv("MAX_LEN", "512"))
-HOST      = os.getenv("HOST", "127.0.0.1")  # internal only
+HOST      = os.getenv("HOST", "127.0.0.1")
 PORT      = int(os.getenv("PORT", "8001"))
 
 LABELS    = {0: "LOW", 1: "MEDIUM", 2: "HIGH"}
 
-# ── Signals для explainability ────────────────────────────────────────────────
+# ── Signals ───────────────────────────────────────────────────────────────────
 SIGNAL_PATTERNS = {
-    "hopelessness":   ["hopeless", "no hope", "pointless", "no point", "nothing matters"],
-    "isolation":      ["alone", "nobody cares", "no one", "isolated", "invisible"],
-    "self_harm":      ["hurt myself", "cutting", "self-harm", "harming myself"],
+    "hopelessness":      ["hopeless", "no hope", "pointless", "no point", "nothing matters"],
+    "isolation":         ["alone", "nobody cares", "no one", "isolated", "invisible"],
+    "self_harm":         ["hurt myself", "cutting", "self-harm", "harming myself"],
     "suicidal_ideation": ["end it", "not be here", "don't want to live", "wish i was dead",
                           "want to die", "kill myself", "suicidal"],
-    "plan_or_action": ["bought", "pills", "rope", "gun", "method", "note", "goodbye",
-                       "decided", "plan", "attempt", "overdose"],
-    "burden_feeling": ["burden", "better off without me", "everyone would be better"],
+    "plan_or_action":    ["bought", "pills", "rope", "gun", "method", "note", "goodbye",
+                          "decided", "plan", "attempt", "overdose"],
+    "burden_feeling":    ["burden", "better off without me", "everyone would be better"],
 }
 
 def detect_signals(text: str) -> list[str]:
     text_lower = text.lower()
-    found = []
-    for signal, keywords in SIGNAL_PATTERNS.items():
-        if any(kw in text_lower for kw in keywords):
-            found.append(signal)
-    return found
+    return [signal for signal, keywords in SIGNAL_PATTERNS.items()
+            if any(kw in text_lower for kw in keywords)]
 
 # ── Model state ───────────────────────────────────────────────────────────────
 class ModelState:
@@ -50,7 +47,6 @@ state = ModelState()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
     logger.info(f"Loading model from {MODEL_DIR}...")
     state.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Device: {state.device}")
@@ -60,30 +56,28 @@ async def lifespan(app: FastAPI):
     state.model.eval()
     logger.info("Model loaded and ready")
     yield
-    # Shutdown
     logger.info("Shutting down")
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="SafePoint ML Service",
-    description="Mental health crisis risk classification",
+    description="Mental health crisis risk classification and wellbeing resource summarization",
     version="1.0.0",
     lifespan=lifespan,
-    docs_url="/docs",      # disable in prod: docs_url=None
+    docs_url="/docs",
     redoc_url=None,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8080"],  # Java API only
-    allow_methods=["POST"],
+    allow_origins=["http://localhost:8080"],
+    allow_methods=["POST", "GET"],
     allow_headers=["Content-Type"],
 )
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 class AnalyzeRequest(BaseModel):
-    text: str = Field(..., min_length=3, max_length=5000,
-                      description="Free-text input from user")
+    text: str = Field(..., min_length=3, max_length=5000)
 
 class Scores(BaseModel):
     low:    float
@@ -91,10 +85,17 @@ class Scores(BaseModel):
     high:   float
 
 class AnalyzeResponse(BaseModel):
-    risk_level:  str          # LOW / MEDIUM / HIGH
-    confidence:  float
-    scores:      Scores
-    signals:     list[str]    # detected crisis signals
+    risk_level: str
+    confidence: float
+    scores:     Scores
+    signals:    list[str]
+
+class SummarizeRequest(BaseModel):
+    url: str = Field(..., description="URL of the wellbeing resource to summarize")
+
+class SummarizeResponse(BaseModel):
+    url:     str
+    excerpt: str | None
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 @app.get("/health")
@@ -102,21 +103,17 @@ def health():
     return {
         "status": "ok",
         "model_loaded": state.model is not None,
-        "device": str(state.device)
+        "device": str(state.device),
     }
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 def analyze(req: AnalyzeRequest):
     if state.model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
-
     try:
         enc = state.tokenizer(
-            req.text,
-            max_length=MAX_LEN,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt"
+            req.text, max_length=MAX_LEN,
+            padding="max_length", truncation=True, return_tensors="pt"
         )
         with torch.no_grad():
             logits = state.model(
@@ -128,22 +125,25 @@ def analyze(req: AnalyzeRequest):
         label_id = int(torch.argmax(torch.tensor(probs)).item())
         signals  = detect_signals(req.text)
 
-        # Не логуємо текст — тільки метрики
         logger.info(f"Analyzed: risk={LABELS[label_id]} conf={probs[label_id]:.3f} signals={signals}")
 
         return AnalyzeResponse(
             risk_level=LABELS[label_id],
             confidence=round(probs[label_id], 3),
-            scores=Scores(
-                low=round(probs[0], 3),
-                medium=round(probs[1], 3),
-                high=round(probs[2], 3),
-            ),
-            signals=signals
+            scores=Scores(low=round(probs[0], 3), medium=round(probs[1], 3), high=round(probs[2], 3)),
+            signals=signals,
         )
     except Exception as e:
         logger.error(f"Inference error: {e}")
         raise HTTPException(status_code=500, detail="Inference failed")
+
+
+@app.post("/summarize", response_model=SummarizeResponse)
+def summarize(req: SummarizeRequest):
+    """Fetch a wellbeing resource URL and return an AI-generated summary."""
+    from summarization import summarize_url
+    excerpt = summarize_url(req.url)
+    return SummarizeResponse(url=req.url, excerpt=excerpt)
 
 
 if __name__ == "__main__":
