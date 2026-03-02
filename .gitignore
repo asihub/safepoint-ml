@@ -9,3 +9,5 @@ model/
 # Training data
 data/
 *.csv
+
+.env
