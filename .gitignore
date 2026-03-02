@@ -1,0 +1,11 @@
+# Model files
+model/
+*.pt
+*.bin
+*.safetensors
+*.ckpt
+*.pkl
+
+# Training data
+data/
+*.csv
