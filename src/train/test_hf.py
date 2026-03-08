@@ -30,7 +30,7 @@ You can practice anywhere, anytime. Research suggests that mindfulness meditatio
 depression, and stress while improving overall mental health and wellbeing.
 """
 
-HF_TOKEN = os.environ.get("HF_TOKEN", "HF_TOKEN_REMOVED")
+HF_TOKEN = os.environ.get("HF_TOKEN")
 
 if not HF_TOKEN:
     print("WARNING: HF_TOKEN not set. Get a free token at https://huggingface.co/settings/tokens")

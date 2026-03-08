@@ -7,7 +7,7 @@ import os
 # ── Конфігурація ─────────────────────────────────────────────────────────────
 DATA_PATH  = r"d:\Develop\General\safe-point\ml-service\data\dataset_clean.csv"
 OUT_PATH   = r"d:\Develop\General\safe-point\ml-service\data\dataset_augmented.csv"
-API_KEY    = "ANTHROPIC_KEY_REMOVED"
+API_KEY    = os.environ.get("API_KEY_ANTHROPIC")
 
 # Скільки нових прикладів генерувати на клас
 SAMPLES_PER_CLASS = 100
