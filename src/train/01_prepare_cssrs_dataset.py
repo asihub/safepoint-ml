@@ -29,7 +29,7 @@ What this script does:
     7. Saves the cleaned dataset        → data/dataset_clean.csv
 
 Output:
-    data/dataset_clean.csv   — used by merge_all.py (Step 4)
+    data/dataset_clean.csv   — used by 03_merge_all_datasets.py (Step 4)
 
 Next step:
     Run 02_prepare_reddit_dataset.py (Step 2)
