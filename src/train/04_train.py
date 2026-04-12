@@ -13,21 +13,71 @@ from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.utils.class_weight import compute_class_weight
 import os
 
-# ── Конфігурація ─────────────────────────────────────────────────────────────
+"""
+04_train.py
+───────────
+Step 4 of 5 in the SafePoint ML training pipeline.
+
+Fine-tunes distilbert-base-uncased on the merged SafePoint dataset
+for 3-class mental health crisis risk classification (LOW / MEDIUM / HIGH).
+
+Input:
+    data/dataset_final.csv   — merged dataset from 03_merge_all_datasets.py
+                               ~1,829 records | LOW: 786 | MEDIUM: 721 | HIGH: 222
+
+Model:
+    Base:         distilbert-base-uncased (~66M parameters)
+    Task:         Sequence classification, 3 labels
+    Output dir:   model/
+
+Training configuration:
+    MAX_LEN:           512 tokens (truncation applied to longer texts)
+    BATCH_SIZE:        2   (safe for GTX 1650, 4.3 GB VRAM)
+    GRAD_ACCUM_STEPS:  4   (effective batch size = 8)
+    EPOCHS:            4   (with early stopping, patience=2)
+    LEARNING_RATE:     2e-5
+    SEED:              42
+
+Class imbalance handling:
+    sklearn compute_class_weight('balanced') applied to training set.
+    HIGH class receives ~2.6x weight to compensate for underrepresentation.
+    Loss function: CrossEntropyLoss with class weights.
+
+Early stopping:
+    Saves best model checkpoint when val_loss improves.
+    Stops training if val_loss does not improve for 2 consecutive epochs.
+
+What this script does:
+    1. Loads and splits dataset (80% train / 20% val, stratified)
+    2. Downloads distilbert-base-uncased tokenizer and model from HuggingFace
+    3. Computes class weights and configures weighted loss
+    4. Trains for up to 4 epochs with gradient accumulation
+    5. Saves best checkpoint to model/ after each improvement
+    6. Prints classification report and confusion matrix on val set
+
+Output:
+    model/   — fine-tuned DistilBERT model (overwrites previous version)
+               make sure to back up model/ before running
+
+Next step:
+    Run 05_evaluate.py
+"""
+
+# ── Configuration ─────────────────────────────────────────────────────────────
 DATA_PATH            = r"d:\Develop\General\safe-point\ml-service\data\dataset_final.csv"
 MODEL_DIR            = r"d:\Develop\General\safe-point\ml-service\model"
 MODEL_NAME           = "distilbert-base-uncased"
 
 EPOCHS               = 4
-BATCH_SIZE           = 2       # GTX 1650 — безпечно при MAX_LEN=512
-GRAD_ACCUM_STEPS     = 4       # імітує batch_size=4 без додаткової VRAM
+BATCH_SIZE           = 2       # GTX 1650 — safe for MAX_LEN=512
+GRAD_ACCUM_STEPS     = 4       # simulates batch_size=4 without additional VRAM
 MAX_LEN              = 512
 LR                   = 2e-5
 SEED                 = 42
 
 LABELS               = {0: "low", 1: "medium", 2: "high"}
 
-# ── Відтворюваність ───────────────────────────────────────────────────────────
+# ── Reproducibility ───────────────────────────────────────────────────────────
 torch.manual_seed(SEED)
 np.random.seed(SEED)
 
@@ -39,12 +89,12 @@ if device.type == "cuda":
 
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-# ── Датасет ───────────────────────────────────────────────────────────────────
+# ── Dataset ───────────────────────────────────────────────────────────────────
 df = pd.read_csv(DATA_PATH)
 df = df.dropna(subset=["text", "label_id"])
 df["label_id"] = df["label_id"].astype(int)
 
-print(f"\nРозподіл класів:")
+print(f"\nClass distribution:")
 print(df["label_id"].value_counts().sort_index().rename(LABELS))
 
 train_df, val_df = train_test_split(
@@ -52,7 +102,7 @@ train_df, val_df = train_test_split(
 )
 print(f"\nTrain: {len(train_df)} | Val: {len(val_df)}")
 
-# ── Токенізатор ───────────────────────────────────────────────────────────────
+# ── Tokenizer ───────────────────────────────────────────────────────────────
 tokenizer = DistilBertTokenizer.from_pretrained(MODEL_NAME)
 
 class MentalHealthDataset(Dataset):
@@ -85,7 +135,7 @@ val_dataset   = MentalHealthDataset(val_df["text"],   val_df["label_id"],   toke
 train_loader  = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
 val_loader    = DataLoader(val_dataset,   batch_size=BATCH_SIZE, shuffle=False)
 
-# ── Клас ваги (компенсація дисбалансу) ───────────────────────────────────────
+# ── Class weights (imbalance compensation) ───────────────────────────────────────
 class_weights = compute_class_weight(
     class_weight="balanced",
     classes=np.array([0, 1, 2]),
@@ -94,7 +144,7 @@ class_weights = compute_class_weight(
 class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
 print(f"\nClass weights: {class_weights.cpu().numpy().round(2)}")
 
-# ── Модель ────────────────────────────────────────────────────────────────────
+# ── Model ────────────────────────────────────────────────────────────────────
 model = DistilBertForSequenceClassification.from_pretrained(
     MODEL_NAME, num_labels=3
 )
@@ -109,7 +159,7 @@ scheduler   = get_linear_schedule_with_warmup(
 )
 loss_fn = torch.nn.CrossEntropyLoss(weight=class_weights)
 
-# ── Тренування ────────────────────────────────────────────────────────────────
+# ── Training ────────────────────────────────────────────────────────────────
 def train_epoch(model, loader, optimizer, scheduler, loss_fn, device, accum_steps):
     model.train()
     total_loss, correct, total = 0, 0, 0
@@ -163,14 +213,14 @@ best_val_acc = 0
 best_val_loss = float("inf")
 patience = 2
 no_improve = 0
-print(f"\nMAX_LEN={MAX_LEN} | BATCH_SIZE={BATCH_SIZE} | GRAD_ACCUM={GRAD_ACCUM_STEPS} (ефективний batch={BATCH_SIZE*GRAD_ACCUM_STEPS})")
+print(f"\nMAX_LEN={MAX_LEN} | BATCH_SIZE={BATCH_SIZE} | GRAD_ACCUM={GRAD_ACCUM_STEPS} (effective batch={BATCH_SIZE*GRAD_ACCUM_STEPS})")
 print("="*60)
-print("Початок тренування")
+print("Starting training")
 print("="*60)
 
 for epoch in range(1, EPOCHS + 1):
     if device.type == "cuda":
-        print(f"\nVRAM до epoch {epoch}: {torch.cuda.memory_allocated()/1e9:.2f} GB / {torch.cuda.get_device_properties(0).total_memory/1e9:.1f} GB")
+        print(f"\nVRAM before epoch {epoch}: {torch.cuda.memory_allocated()/1e9:.2f} GB / {torch.cuda.get_device_properties(0).total_memory/1e9:.1f} GB")
 
     train_loss, train_acc = train_epoch(model, train_loader, optimizer, scheduler, loss_fn, device, GRAD_ACCUM_STEPS)
     val_loss, val_acc, val_preds, val_labels = eval_epoch(model, val_loader, loss_fn, device)
@@ -185,16 +235,16 @@ for epoch in range(1, EPOCHS + 1):
         no_improve = 0
         model.save_pretrained(MODEL_DIR)
         tokenizer.save_pretrained(MODEL_DIR)
-        print(f"  ✓ Нова найкраща модель збережена (val_acc={val_acc:.4f})")
+        print(f"  ✓ New best model saved (val_acc={val_acc:.4f})")
     else:
         no_improve += 1
         if no_improve >= patience:
-            print(f"  Early stopping — val_loss не покращується {patience} епохи")
+            print(f"  Early stopping — val_loss not improving for {patience} epochs")
             break
 
-# ── Фінальний звіт ────────────────────────────────────────────────────────────
+# ── Final report ────────────────────────────────────────────────────────────
 print("\n" + "="*60)
-print("Classification Report (найкраща модель на val set)")
+print("Classification Report (best model on val set)")
 print("="*60)
 print(classification_report(
     val_labels, val_preds,
@@ -203,5 +253,5 @@ print(classification_report(
 
 print("Confusion Matrix:")
 print(confusion_matrix(val_labels, val_preds))
-print(f"\nНайкраща val accuracy: {best_val_acc:.4f}")
-print(f"Модель збережена: {MODEL_DIR}")
+print(f"\nBest val accuracy: {best_val_acc:.4f}")
+print(f"Model saved: {MODEL_DIR}")
