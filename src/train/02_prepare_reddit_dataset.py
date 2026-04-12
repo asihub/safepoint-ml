@@ -31,7 +31,7 @@ Next step:
     Run 03_augment_dataset.py
 """
 
-OUT_DIR = r"d:\Develop\General\safe-point\ml-service\data"
+OUT_DIR = r"../../data"
 
 # ── Loading ──────────────────────────────────────────────────────────────
 print("Loading solomonk/reddit_mental_health_posts...")

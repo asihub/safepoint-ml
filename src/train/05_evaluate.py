@@ -34,7 +34,7 @@ Output:
     No files saved.
 """
 
-MODEL_DIR = r"d:\Develop\General\safe-point\ml-service\model"
+MODEL_DIR = r"../../model"
 MAX_LEN   = 256
 LABELS    = {0: "LOW", 1: "MEDIUM", 2: "HIGH"}
 

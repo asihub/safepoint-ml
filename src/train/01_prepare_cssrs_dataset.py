@@ -35,7 +35,7 @@ Next step:
     Run 02_prepare_reddit_dataset.py (Step 2)
 """
 
-DATA_DIR = r"d:\Develop\General\safe-point\ml-service\data"
+DATA_DIR = r"../../data"
 CSV_PATH = rf"{DATA_DIR}\500_anonymized_Reddit_users_posts_labels - 500_anonymized_Reddit_users_posts_labels.csv"
 
 # -- 1. Loading

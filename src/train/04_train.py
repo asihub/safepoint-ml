@@ -64,8 +64,8 @@ Next step:
 """
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-DATA_PATH            = r"d:\Develop\General\safe-point\ml-service\data\dataset_final.csv"
-MODEL_DIR            = r"d:\Develop\General\safe-point\ml-service\model"
+DATA_PATH            = r"../../data/dataset_final.csv"
+MODEL_DIR            = r"../../model"
 MODEL_NAME           = "distilbert-base-uncased"
 
 EPOCHS               = 4

@@ -38,7 +38,7 @@ Next step:
     Run 04_train.py
 """
 
-DATA_DIR = r"d:\Develop\General\safe-point\ml-service\data"
+DATA_DIR = r"../../data"
 
 # All datasets
 files = {
